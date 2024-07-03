@@ -1,14 +1,21 @@
 import os
-import cv2
 import argparse
 import conf  # Assurez-vous d'avoir un fichier conf.py avec la variable IMAGEMAGICK_BINARY définie
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips, AudioFileClip, ImageClip, concatenate_audioclips
-import pyttsx3
+from moviepy.editor import concatenate_videoclips, AudioFileClip, ImageClip
+from datetime import datetime
 
 # Spécifiez le chemin vers l'exécutable ImageMagick depuis conf.py
 os.environ['IMAGEMAGICK_BINARY'] = conf.IMAGEMAGICK_BINARY
 
-def generate_video(image_folder, output_video, frame_rate, text, text_size, text_color, speech_text):
+def generate_video(image_folder, output_folder, frame_rate, background_music):
+    # Crée le dossier de sortie s'il n'existe pas
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    # Génère un nom de fichier unique basé sur l'horodatage actuel
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    output_video = os.path.join(output_folder, f"output_video_{timestamp}.mp4")
+
     # Obtient la liste des fichiers d'images dans le dossier spécifié
     images = [img for img in os.listdir(image_folder) if img.endswith(".jpg") or img.endswith(".png")]
 
@@ -17,18 +24,31 @@ def generate_video(image_folder, output_video, frame_rate, text, text_size, text
         print("Aucune image trouvée dans le dossier spécifié.")
         return
 
+    # Assurez-vous qu'il y a au moins quatre images
+    if len(images) < 4:
+        print("Il doit y avoir au moins quatre images dans le dossier spécifié.")
+        return
+
     # Trie les images par nom de fichier
     images.sort(key=lambda x: int(x.split('.')[0]) if x.split('.')[0].isdigit() else x)
     print(f"Images trouvées : {images}")
 
+    # Calculez la durée pour les trois premières images (12 secondes au total, donc 4 secondes chacune)
+    duration_per_image = 4  # 12 secondes pour 3 images
+
     # Liste pour stocker les clips vidéo individuels
     clips = []
 
-    # Crée un clip pour chaque image avec une durée spécifiée
-    for image in images:
+    # Crée un clip pour chaque des trois premières images avec une durée de 4 secondes
+    for image in images[:3]:
         img_path = os.path.join(image_folder, image)
-        img_clip = ImageClip(img_path).set_duration(1)  # Définit chaque image à une durée de 1 seconde
+        img_clip = ImageClip(img_path).set_duration(duration_per_image)
         clips.append(img_clip)
+
+    # Crée un clip pour la quatrième image qui dure 8 secondes (total = 20 secondes)
+    last_image_path = os.path.join(image_folder, images[3])
+    last_img_clip = ImageClip(last_image_path).set_duration(8)
+    clips.append(last_img_clip)
 
     # Combine les clips en un seul clip vidéo
     video_clip = concatenate_videoclips(clips, method="compose")
@@ -39,49 +59,27 @@ def generate_video(image_folder, output_video, frame_rate, text, text_size, text
     # Vérifiez la durée du clip vidéo
     print(f"Durée de la vidéo combinée : {video_clip.duration} secondes")
 
-    # Ajoute du texte si spécifié
-    if text:
-        txt_clip = TextClip(text, fontsize=text_size, color=text_color, font='Arial-Bold', method='caption')
-        txt_clip = txt_clip.set_position(('center', 'bottom')).set_duration(video_clip.duration)
-        video_clip = CompositeVideoClip([video_clip, txt_clip])
-
-    # Ajoute de l'audio si spécifié
-    if speech_text:
-        # Génère un fichier audio temporaire
-        tts = pyttsx3.init()
-        tts.save_to_file(speech_text, "temp_audio.mp3")
-        tts.runAndWait()
-
-        # Charge le fichier audio
-        audio_clip = AudioFileClip("temp_audio.mp3")
+    # Ajoute de la musique de fond si spécifié
+    if background_music:
+        # Charge le fichier audio de fond
+        audio_clip = AudioFileClip(background_music).subclip(0, video_clip.duration)
         
         # Ajuster la durée de l'audio pour qu'elle corresponde à la durée de la vidéo
         if audio_clip.duration < video_clip.duration:
-            # Duplique l'audio jusqu'à ce qu'il atteigne la durée requise
-            audio_clips = [audio_clip] * (int(video_clip.duration // audio_clip.duration) + 1)
-            audio_clip = concatenate_audioclips(audio_clips).set_duration(video_clip.duration)
+            audio_clip = audio_clip.set_duration(video_clip.duration)
         
         video_clip = video_clip.set_audio(audio_clip)
 
-    # Sauvegarde la vidéo finale avec texte et/ou audio
+    # Sauvegarde la vidéo finale avec audio
     video_clip.write_videofile(output_video, codec='libx264', audio_codec='aac', fps=frame_rate)
 
-    # Supprime les fichiers temporaires
-    if os.path.exists("temp_video.mp4"):
-        os.remove("temp_video.mp4")
-    if speech_text and os.path.exists("temp_audio.mp3"):
-        os.remove("temp_audio.mp3")
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Generate video from images with optional text and speech')
+    parser = argparse.ArgumentParser(description='Generate video from images with optional background music')
     parser.add_argument('image_folder', type=str, help='Path to the folder containing images')
-    parser.add_argument('output_video', type=str, help='Path to the output video file')
+    parser.add_argument('output_folder', type=str, help='Path to the output folder')
     parser.add_argument('--frame_rate', type=int, default=30, help='Frame rate of the output video (default: 30)')
-    parser.add_argument('--text', type=str, default='', help='Text to display on the video')
-    parser.add_argument('--text_size', type=int, default=30, help='Font size of the text (default: 30)')
-    parser.add_argument('--text_color', type=str, default='#FF0000', help='Color of the text in hexadecimal format (default: #FF0000)')
-    parser.add_argument('--speech_text', type=str, default='', help='Speech text to add as speech in the video')
+    parser.add_argument('--background_music', type=str, default='', help='Path to the background music file')
 
     args = parser.parse_args()
 
-    generate_video(args.image_folder, args.output_video, args.frame_rate, args.text, args.text_size, args.text_color, args.speech_text)
+    generate_video(args.image_folder, args.output_folder, args.frame_rate, args.background_music)
